@@ -97,7 +97,7 @@ namespace nfs2iso2nfs
                         nfsDir = args[i + 1];
                         i++;
                         break;
-                    case "-h":
+                    case "-help":
                         Console.WriteLine("+++++ NFS2ISO2NFS +++++");
                         Console.WriteLine();
                         Console.WriteLine("-dec            Decrypt .nfs files to an .iso file.");
@@ -420,13 +420,13 @@ namespace nfs2iso2nfs
                 Console.WriteLine();
                 int numberOfParts = 0x1000000 * header[0x10] + 0x10000 * header[0x11] + 0x100 * header[0x12] + header[0x13];
                 Console.WriteLine(numberOfParts + " parts found...");
-                int start, length;
-                int pos = 0x0;
-                int j = 0;
+                long start, length;
+                long pos = 0x0;
+                long j = 0;
                 for (int i = 0; i < numberOfParts; i++)
                 {
-                    start = SECTOR_SIZE * (0x1000000 * header[0x14 + i * 0x8] + 0x10000 * header[0x15 + i * 0x8] + 0x100 * header[0x16 + i * 0x8] + header[0x17 + i * 0x8]);
-                    length = SECTOR_SIZE * (0x1000000 * header[0x18 + i * 0x8] + 0x10000 * header[0x19 + i * 0x8] + 0x100 * header[0x1A + i * 0x8] + header[0x1B + i * 0x8]);
+                    start = (long)SECTOR_SIZE * ((long)0x1000000 * (long)header[0x14 + i * 0x8] + (long)0x10000 * (long)header[0x15 + i * 0x8] + (long)0x100 * (long)header[0x16 + i * 0x8] + (long)header[0x17 + i * 0x8]);
+                    length = (long)SECTOR_SIZE * ((long)0x1000000 * (long)header[0x18 + i * 0x8] + (long)0x10000 * (long)header[0x19 + i * 0x8] + (long)0x100 * (long)header[0x1A + i * 0x8] + (long)header[0x1B + i * 0x8]);
                     j = start - pos;
                     Console.WriteLine("Writing zero segment " + i + " of size 0x" + Convert.ToString(j, 16));
                     while (j > 0)
@@ -522,13 +522,13 @@ namespace nfs2iso2nfs
 
                 int numberOfParts = 0x1000000 * header[0x10] + 0x10000 * header[0x11] + 0x100 * header[0x12] + header[0x13];
                 Console.WriteLine("Packing " + numberOfParts + " parts...");
-                int start, length;
-                int pos = 0x0;
-                int j = 0;
+                long start, length;
+                long pos = 0x0;
+                long j = 0;
                 for (int i = 0; i < numberOfParts; i++)
                 {
-                    start = SECTOR_SIZE * (0x1000000 * header[0x14 + i * 0x8] + 0x10000 * header[0x15 + i * 0x8] + 0x100 * header[0x16 + i * 0x8] + header[0x17 + i * 0x8]);
-                    length = SECTOR_SIZE * (0x1000000 * header[0x18 + i * 0x8] + 0x10000 * header[0x19 + i * 0x8] + 0x100 * header[0x1A + i * 0x8] + header[0x1B + i * 0x8]);
+                    start = (long)SECTOR_SIZE * ((long)0x1000000 * (long)header[0x14 + i * 0x8] + (long)0x10000 * (long)header[0x15 + i * 0x8] + (long)0x100 * (long)header[0x16 + i * 0x8] + (long)header[0x17 + i * 0x8]);
+                    length = (long)SECTOR_SIZE * ((long)0x1000000 * (long)header[0x18 + i * 0x8] + (long)0x10000 * (long)header[0x19 + i * 0x8] + (long)0x100 * (long)header[0x1A + i * 0x8] + (long)header[0x1B + i * 0x8]);
                     j = start - pos;
                     Console.WriteLine("Delete zero segment " + i + " of size 0x" + Convert.ToString(j, 16));
                     while (j > 0)
