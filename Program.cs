@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Collections.Generic;
 using System.Linq;
@@ -333,6 +333,8 @@ namespace nfs2iso2nfs
                 partitionOffsets = sort(partitionOffsets, partitionOffsets.Length);
                 sizeInfo[0] = partitionOffsets[0];
                 byte[] IV = new byte[0x10];
+                byte[] decHashBlock = new byte[0x400];
+                byte[] encHashBlock = new byte[0x400];
                 int timer = 0;
                 int l = 0;
                 for (int i = 0; i < partitionOffsets.Length; i++)
@@ -368,18 +370,52 @@ namespace nfs2iso2nfs
                             Console.WriteLine((l * 256) + " MB processed...");
                         }
                         timer++;
-                        ew.Write(er.ReadBytes(0x3D0));
-                        IV = er.ReadBytes(0x10);
-                        ew.Write(IV);
-                        ew.Write(er.ReadBytes(0x20));
-                        Sector = er.ReadBytes(SECTOR_SIZE - 0x400);
-                        Sector = aes_128_cbc(titlekey, IV, Sector, enc);
+
+
+                        // NFS to ISO
+                        if (enc)
+                        {
+                            Array.Clear(IV, 0, 0x10);                                                // clear IV for encrypting hash block
+                            decHashBlock = er.ReadBytes(0x400);                                      // read raw hash table from nfs
+                            encHashBlock = aes_128_cbc(titlekey, IV, decHashBlock, true);            // encrypt table
+                            ew.Write(encHashBlock);                                                  // write encrypted hash table to iso
+
+                            //quit the loop if already at the end of input file or beyond (avoid the crash)
+                            if (er.BaseStream.Position >= er.BaseStream.Length)
+                            {
+                                break;
+                            }
+                            Array.Copy(encHashBlock, 0x3D0, IV, 0, 0x10);                            // get IV for encrypting the rest
+                            Sector = er.ReadBytes(SECTOR_SIZE - 0x400);
+                            Sector = aes_128_cbc(titlekey, IV, Sector, enc);                         // encrypt the remaining bytes
+                        }
+
+                        // ISO to NFS
+                        else
+                        {
+                            Array.Clear(IV, 0, 0x10);                                                // clear IV for decrypting hash table
+                            encHashBlock = er.ReadBytes(0x400);                                      // read encrypted hash table from iso
+                            decHashBlock = aes_128_cbc(titlekey, IV, encHashBlock, false);           // decrypt block
+                            ew.Write(decHashBlock);                                                  // write decrypted hash table to nfs
+
+
+                            //quit the loop if already at the end of input file or beyond (avoid the crash)
+                            if (er.BaseStream.Position >= er.BaseStream.Length)
+                            {
+                                break;
+                            }
+                            Array.Copy(encHashBlock, 0x3D0, IV, 0, 0x10);                           // IV for decrypting the remaining data
+                            Sector = er.ReadBytes(SECTOR_SIZE - 0x400);
+                            Sector = aes_128_cbc(titlekey, IV, Sector, false);                      // decrypt the remaining bytes
+                        }
+
+
                         ew.Write(Sector);
                         partitionSize -= SECTOR_SIZE;
                     }
                     sizeInfo[1] = curPos - sizeInfo[0];
                     if (partitionSize != 0)
-                        Console.WriteLine("Last cluster was not complete. This may be a problem.");
+                        Console.WriteLine("WARNING: Last cluster was not complete. This may be a problem.");
                 }
                 if (enc)
                 {
@@ -565,6 +601,7 @@ namespace nfs2iso2nfs
                 else
                     Console.WriteLine("Decrypting hif.nfs...");
                 Console.WriteLine();
+                byte[] block_iv = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1F, 0x00 };
                 byte[] Sector = new byte[SECTOR_SIZE];
                 int timer = 0;
                 int i = 0;
@@ -580,10 +617,62 @@ namespace nfs2iso2nfs
                     }
                     timer++;
                     Sector = er.ReadBytes(leftSize > SECTOR_SIZE ? SECTOR_SIZE : (int)leftSize);
-                    if (enc)
-                        Sector = aes_128_cbc(key, iv, Sector, true);
-                    else
+
+                    
+                    if(ew.BaseStream.Position >= 0x18000)                               //use the different IVs if writing game partition data
+                    {
+                        iv = block_iv;
+                    }
+
+                    // ENCRYPTION
+                    if (enc && ew.BaseStream.Position < 0x18000)                        // if encrypting and not game partition
+                    {
+                        Sector = aes_128_cbc(key, iv, Sector, true);                    // use zero IV
+                    }
+                    
+                    if (enc && ew.BaseStream.Position >= 0x18000)                       // if encrypting game partition
+                    {
+                        Sector = aes_128_cbc(key, block_iv, Sector, true);              // use different IV for each block
+                        block_iv[15]++;                                                 // increment the value after writing
+                        if (block_iv[15] == 0)                                          // and go further if necessary 
+                        {
+                            block_iv[14]++;
+                            if (block_iv[14] == 0)
+                            {
+                                block_iv[13]++;
+                                if (block_iv[13] == 0)
+                                {
+                                    block_iv[12]++;                                     // I suppose it's a 4 byte value...?
+                                }                                                       // it won't ever happen anyway
+                            }
+                        }
+                    }
+
+                    // DECRYPTION
+                    if (!enc && ew.BaseStream.Position < 0x18000)                       // if decrypting and not game partition
+                    {
                         Sector = aes_128_cbc(key, iv, Sector, false);
+                    }
+                    
+                    if (!enc && ew.BaseStream.Position >= 0x18000)                      // if decrypting game partition
+                    {
+                        Sector = aes_128_cbc(key, iv, Sector, false);                   // use different IV for each block
+                        block_iv[15]++;                                                 // increment the value after writing
+                        if (block_iv[15] == 0)                                          // and go further if necessary 
+                        {
+                            block_iv[14]++;
+                            if (block_iv[14] == 0)
+                            {
+                                block_iv[13]++;
+                                if (block_iv[13] == 0)
+                                {
+                                    block_iv[12]++;                                     // I suppose it's a 4 byte value...?
+                                }                                                       // it won't ever happen anyway
+                            }
+                        }
+
+                    }
+
 
                     //write it to outfile
                     ew.Write(Sector);
