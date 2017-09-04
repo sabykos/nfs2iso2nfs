@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.Runtime.InteropServices;
 
 namespace nfs2iso2nfs
 {
@@ -16,10 +17,12 @@ namespace nfs2iso2nfs
         public static bool dec = false;
         public static bool enc = false;
         public static bool keepFiles = false;
+        public static bool keepLegit = false;
         public static string keyFile = "..\\code\\htk.bin";
         public static string isoFile = "game.iso";
         public static string wiiKeyFile = "wii_common_key.bin";
         public static string nfsDir = "";
+        public static string fwFile = "..\\code\\fw.img";
 
         static void Main(string[] args)
         {
@@ -45,6 +48,8 @@ namespace nfs2iso2nfs
             }
             else if (enc)
             {
+                if (!keepLegit)
+                    patchFakeSigning(fwFile);
                 long[] size = manipulateISO(isoFile, "hif_unpack.nfs", false);
                 byte[] header = packNFS("hif_unpack.nfs", "hif_dec.nfs", size);
                 if (!keepFiles)
@@ -73,6 +78,9 @@ namespace nfs2iso2nfs
                     case "-keep":
                         keepFiles = true;
                         break;
+                    case "-legit":
+                        keepLegit = true;
+                        break;
                     case "-key":
                         if (i == args.Length)
                             return -1;
@@ -97,16 +105,24 @@ namespace nfs2iso2nfs
                         nfsDir = args[i + 1];
                         i++;
                         break;
+                    case "-fwimg":
+                        if (i == args.Length)
+                            return -1;
+                        fwFile = args[i + 1];
+                        i++;
+                        break;
                     case "-help":
-                        Console.WriteLine("+++++ NFS2ISO2NFS +++++");
+                        Console.WriteLine("+++++ NFS2ISO2NFS v0.4+++++");
                         Console.WriteLine();
                         Console.WriteLine("-dec            Decrypt .nfs files to an .iso file.");
-                        Console.WriteLine("-enc            Encrypt an .íso file to -nfs file.s");
-                        Console.WriteLine("-key <file>     Location of AES key file. Default: code\\htk.bin.");
-                        Console.WriteLine("-wiikey <file>  Location of Wii Common key file. Default: wii_common_key.bin.");
-                        Console.WriteLine("-iso <file>     Location of .iso file. Default: game.iso.");
-                        Console.WriteLine("-nfs <file>     Location of .nfs files. Default: current Directory.");
+                        Console.WriteLine("-enc            Encrypt an .iso file to -nfs file(s)");
+                        Console.WriteLine("-key <file>     Location of AES key file. DEFAULT: code\\htk.bin.");
+                        Console.WriteLine("-wiikey <file>  Location of Wii Common key file. DEFAULT: wii_common_key.bin.");
+                        Console.WriteLine("-iso <file>     Location of .iso file. DEFAULT: game.iso.");
+                        Console.WriteLine("-nfs <file>     Location of .nfs files. DEFAULT: current Directory.");
+                        Console.WriteLine("-fwimg <file>   Location of fw.img. DEFAULT: code\\fw.img.");
                         Console.WriteLine("-keep           Don't delete the files produced in intermediate steps.");
+                        Console.WriteLine("-legit          Don't patch fw.img to allow fakesigned content");
                         Console.WriteLine("-help           Print this text.");
                         return -1;
                     default:
@@ -122,7 +138,8 @@ namespace nfs2iso2nfs
                 wiiKeyFile = dir + "\\" + wiiKeyFile;
             if (!Path.IsPathRooted(nfsDir))
                 nfsDir = dir + "\\" + nfsDir;
-
+            if (!Path.IsPathRooted(fwFile))
+                fwFile = dir + "\\" + fwFile;
 
             if (dec || ((!dec && !enc) && File.Exists(nfsDir + "\\hif_000000.nfs")))
             {
@@ -148,6 +165,11 @@ namespace nfs2iso2nfs
                 if (!dec && enc && !File.Exists(isoFile))
                 {
                     Console.WriteLine(".iso file not found! Exiting...");
+                    return -1;
+                }
+                if (!dec && enc && !File.Exists(fwFile))
+                {
+                    Console.WriteLine("fw.img not found! Exiting...");
                     return -1;
                 }
                 else if (((dec && enc) || (!dec && !enc)) && File.Exists(isoFile))
@@ -333,8 +355,8 @@ namespace nfs2iso2nfs
                 partitionOffsets = sort(partitionOffsets, partitionOffsets.Length);
                 sizeInfo[0] = partitionOffsets[0];
                 byte[] IV = new byte[0x10];
-                byte[] decHashBlock = new byte[0x400];
-                byte[] encHashBlock = new byte[0x400];
+                byte[] decHashTable = new byte[0x400];
+                byte[] encHashTable = new byte[0x400];
                 int timer = 0;
                 int l = 0;
                 for (int i = 0; i < partitionOffsets.Length; i++)
@@ -375,17 +397,17 @@ namespace nfs2iso2nfs
                         // NFS to ISO
                         if (enc)
                         {
-                            Array.Clear(IV, 0, 0x10);                                                // clear IV for encrypting hash block
-                            decHashBlock = er.ReadBytes(0x400);                                      // read raw hash table from nfs
-                            encHashBlock = aes_128_cbc(titlekey, IV, decHashBlock, true);            // encrypt table
-                            ew.Write(encHashBlock);                                                  // write encrypted hash table to iso
+                            Array.Clear(IV, 0, 0x10);                                                // clear IV for encrypting hash table
+                            decHashTable = er.ReadBytes(0x400);                                      // read raw hash table from nfs
+                            encHashTable = aes_128_cbc(titlekey, IV, decHashTable, true);            // encrypt table
+                            ew.Write(encHashTable);                                                  // write encrypted hash table to iso
 
                             //quit the loop if already at the end of input file or beyond (avoid the crash)
                             if (er.BaseStream.Position >= er.BaseStream.Length)
                             {
                                 break;
                             }
-                            Array.Copy(encHashBlock, 0x3D0, IV, 0, 0x10);                            // get IV for encrypting the rest
+                            Array.Copy(encHashTable, 0x3D0, IV, 0, 0x10);                            // get IV for encrypting the rest
                             Sector = er.ReadBytes(SECTOR_SIZE - 0x400);
                             Sector = aes_128_cbc(titlekey, IV, Sector, enc);                         // encrypt the remaining bytes
                         }
@@ -394,9 +416,9 @@ namespace nfs2iso2nfs
                         else
                         {
                             Array.Clear(IV, 0, 0x10);                                                // clear IV for decrypting hash table
-                            encHashBlock = er.ReadBytes(0x400);                                      // read encrypted hash table from iso
-                            decHashBlock = aes_128_cbc(titlekey, IV, encHashBlock, false);           // decrypt block
-                            ew.Write(decHashBlock);                                                  // write decrypted hash table to nfs
+                            encHashTable = er.ReadBytes(0x400);                                      // read encrypted hash table from iso
+                            decHashTable = aes_128_cbc(titlekey, IV, encHashTable, false);           // decrypt table
+                            ew.Write(decHashTable);                                                  // write decrypted hash table to nfs
 
 
                             //quit the loop if already at the end of input file or beyond (avoid the crash)
@@ -404,7 +426,7 @@ namespace nfs2iso2nfs
                             {
                                 break;
                             }
-                            Array.Copy(encHashBlock, 0x3D0, IV, 0, 0x10);                           // IV for decrypting the remaining data
+                            Array.Copy(encHashTable, 0x3D0, IV, 0, 0x10);                           // IV for decrypting the remaining data
                             Sector = er.ReadBytes(SECTOR_SIZE - 0x400);
                             Sector = aes_128_cbc(titlekey, IV, Sector, false);                      // decrypt the remaining bytes
                         }
@@ -766,5 +788,60 @@ namespace nfs2iso2nfs
             }
             return list;
         }
+
+
+        [DllImport("msvcrt.dll", CallingConvention = CallingConvention.Cdecl)]
+        static extern int memcmp(byte[] b1, byte[] b2, long count);
+
+        static bool ByteArrayCompare(byte[] b1, byte[] b2)
+        {
+            // Validate buffers are the same length.
+            // This also ensures that the count does not exceed the length of either buffer.  
+            return b1.Length == b2.Length && memcmp(b1, b2, b1.Length) == 0;
+        }
+
+
+        public static void patchFakeSigning(string fwFile)
+        {
+            if (File.Exists("fw.img.tmp"))                                                             // delete any existent temp file
+            {
+                File.Delete("fw.img.tmp");
+            }
+            File.Copy(fwFile, "fw.img.tmp");                                                        // create new temp file
+
+            using (var in_ios = new BinaryReader(File.OpenRead(fwFile)))
+            using (var out_ios = new BinaryWriter(File.OpenWrite(Directory.GetCurrentDirectory() + "\\fw.img.tmp")))
+            {
+                Console.WriteLine();
+                Console.WriteLine("Patching fw.img to enable fakesigning...");
+                int patchCount = 0;
+
+                byte[] buff = new byte[4];
+                byte[] oldHashCheck = { 0x20, 0x07, 0x23, 0xA2 };
+                byte[] newHashCheck = { 0x20, 0x07, 0x4B, 0x0B };
+
+                for (int offset = 0; offset < in_ios.BaseStream.Length - 4; offset++)
+                {
+                    in_ios.BaseStream.Position = offset;                                                // set position to advance byte by byte
+                    buff = in_ios.ReadBytes(4);                                                         // because we read 4 bytes at once
+                    if (ByteArrayCompare(buff, oldHashCheck) || ByteArrayCompare(buff, newHashCheck))   // see if it matches one of the patterns
+                    {
+                        out_ios.Seek(offset + 1, SeekOrigin.Begin);                                     // if it does, advance on byte further in
+                        out_ios.Write((byte)0x00);                                                      // the output and write a zero
+                        patchCount++;
+                    }
+                    
+                }
+                if (patchCount == 0)
+                    Console.WriteLine("Nothing to patch");
+                else
+                    Console.WriteLine("Patching fakesigning finished... (Patches applied: {0})", patchCount);
+            }
+            File.Delete(fwFile);                                                                 // delete original fw.img
+            File.Copy("fw.img.tmp", fwFile);                                                     // replace with patched temp file
+            File.Delete("fw.img.tmp");                                                           // delete temp file
+
+        }
+
     }
 }
