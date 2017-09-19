@@ -130,7 +130,7 @@ namespace nfs2iso2nfs
                         break;
 
                     case "-help":
-                        Console.WriteLine("+++++ NFS2ISO2NFS v0.5.2 +++++");
+                        Console.WriteLine("+++++ NFS2ISO2NFS v0.5.3 +++++");
                         Console.WriteLine();
                         Console.WriteLine("-dec            Decrypt .nfs files to an .iso file.");
                         Console.WriteLine("-enc            Encrypt an .iso file to .nfs file(s)");
@@ -1192,7 +1192,7 @@ namespace nfs2iso2nfs
 
                 //nintendont 3
                 byte[] pattern_nintendont_3 = { 0x0D, 0x80, 0x00, 0x00, 0x0D, 0x80, 0x00, 0x00 };
-                byte[] patch_nintendont_3 = { 0x0D, 0x80, 0x00, 0x00, 0x0D, 0x80, 0x00, 0x00, 0x00, 0x1C, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0F, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00 };
+                byte[] patch_nintendont_3 = { 0x0D, 0x80, 0x00, 0x00, 0x0D, 0x80, 0x00, 0x00, 0x00, 0x1C, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0F, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00 };
                 for (int offset = 0; offset < input_ios.Length - 8; offset++)
                 {
                     input_ios.Position = offset;                                              // set position to advance byte by byte
