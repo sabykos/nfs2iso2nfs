@@ -22,6 +22,7 @@ namespace nfs2iso2nfs
         public static bool vert_wiimote = false;
         public static bool map_shoulder_to_trigger = false;
         public static bool homebrew = false;
+        public static bool passthrough = false;
         public static string keyFile = "..\\code\\htk.bin";
         public static string isoFile = "game.iso";
         public static string wiiKeyFile = "wii_common_key.bin";
@@ -128,9 +129,12 @@ namespace nfs2iso2nfs
                     case "-homebrew":
                         homebrew = true;
                         break;
+                    case "-passthrough":
+                        passthrough = true;
+                        break;
 
                     case "-help":
-                        Console.WriteLine("+++++ NFS2ISO2NFS v0.5.3 +++++");
+                        Console.WriteLine("+++++ NFS2ISO2NFS v0.5.4 +++++");
                         Console.WriteLine();
                         Console.WriteLine("-dec            Decrypt .nfs files to an .iso file.");
                         Console.WriteLine("-enc            Encrypt an .iso file to .nfs file(s)");
@@ -145,6 +149,7 @@ namespace nfs2iso2nfs
                         Console.WriteLine("-wiimote        Emulate a Wii Remote instead of the Classic Controller");
                         Console.WriteLine("-vertical       Remap Wii Remote d-pad for vertical usage (implies -wiimote)");
                         Console.WriteLine("-homebrew       Various patches to enable proper homebrew functionality");
+                        Console.WriteLine("-passthrough    Allow homebrew to keep using normal wiimotes with gamepad enabled");
                         Console.WriteLine("-help           Print this text.");
                         return -1;
                     default:
@@ -956,7 +961,6 @@ namespace nfs2iso2nfs
 
                         patchCount++;
                     }
-
                 }
 
                 if (patchCount == 0)
@@ -988,7 +992,6 @@ namespace nfs2iso2nfs
 
                         patchCount++;
                     }
-
                 }
 
                 if (patchCount == 0)
@@ -1001,12 +1004,12 @@ namespace nfs2iso2nfs
             }
 
 
-            //enable horizontal wii remote emulation (remap dpad)
+            //enable horizontal wii remote emulation (remap dpad and ab12)
             if (vert_wiimote)
             {
                 Array.Clear(buffer_8, 0, 8);
                 int patchCount = 0;
-                byte[] pattern = { 0x00, 0x2B, 0x00, 0xD0, 0x00, 0x80, 0x08, 0x9A };
+                byte[] pattern = { 0x4A, 0x71, 0x42, 0x13, 0xD0, 0xD2, 0x9B, 0x00 };
 
                 for (int offset = 0; offset < input_ios.Length - 8; offset++)
                 {
@@ -1015,20 +1018,37 @@ namespace nfs2iso2nfs
 
                     if (ByteArrayCompare(buffer_8, pattern))                                  // see if it matches
                     {
-                        input_ios.Seek(offset, SeekOrigin.Begin);
+                        input_ios.Seek(offset + 0x07, SeekOrigin.Begin);
                         input_ios.WriteByte(0x02);                                            // dpad left -> down
                         patchCount++;
 
-                        input_ios.Seek(offset + 8, SeekOrigin.Begin);
+                        input_ios.Seek(offset + 0x0F, SeekOrigin.Begin);
                         input_ios.WriteByte(0x03);                                            // dpad right -> up
                         patchCount++;
 
-                        input_ios.Seek(offset + 0x16, SeekOrigin.Begin);
+                        input_ios.Seek(offset + 0x1D, SeekOrigin.Begin);
                         input_ios.WriteByte(0x01);                                            // dpad down -> right
                         patchCount++;
 
-                        input_ios.Seek(offset + 0x24, SeekOrigin.Begin);
+                        input_ios.Seek(offset + 0x2B, SeekOrigin.Begin);
                         input_ios.WriteByte(0x00);                                            // dpad up -> left
+
+                        patchCount++;
+
+                        input_ios.Seek(offset + 0x65, SeekOrigin.Begin);
+                        input_ios.WriteByte(0x07);                                            // B -> 2
+                        patchCount++;
+
+                        input_ios.Seek(offset + 0x75, SeekOrigin.Begin);
+                        input_ios.WriteByte(0x06);                                            // A -> 1
+                        patchCount++;
+
+                        input_ios.Seek(offset + 0x85, SeekOrigin.Begin);
+                        input_ios.WriteByte(0x04);                                            // 1 -> B
+                        patchCount++;
+
+                        input_ios.Seek(offset + 0x95, SeekOrigin.Begin);
+                        input_ios.WriteByte(0x05);                                            // 2 -> A
 
                         patchCount++;
                     }
@@ -1052,6 +1072,120 @@ namespace nfs2iso2nfs
                 int patchCount = 0;
 
 
+                // disable AHBPROT
+                byte[] pattern_ahbprot = { 0xD0, 0x0B, 0x23, 0x08, 0x43, 0x13, 0x60, 0x0B };
+                byte[] patch_ahbprot = { 0x46, 0xC0 };
+
+                for (int offset = 0; offset < input_ios.Length - 8; offset++)
+                {
+                    input_ios.Position = offset;                                              // set position to advance byte by byte
+                    input_ios.Read(buffer_8, 0, 8);                                           // because we read 8 bytes at once
+
+                    if (ByteArrayCompare(buffer_8, pattern_ahbprot))                          // see if it matches
+                    {
+                        Console.WriteLine("* Disabling AHBPROT...");
+                        input_ios.Seek(offset, SeekOrigin.Begin);                             // seek to offset
+                        input_ios.Write(patch_ahbprot, 0, 2);                                 // and then patch
+
+                        patchCount++;
+                    }
+                }
+
+                //disable MEMPROT
+                byte[] pattern_memprot = { 0x01, 0x94, 0xB5, 0x00, 0x4B, 0x08, 0x22, 0x01 };
+                byte[] patch_memprot = { 0x22, 0x00 };
+
+                for (int offset = 0; offset < input_ios.Length - 8; offset++)
+                {
+                    input_ios.Position = offset;                                              // set position to advance byte by byte
+                    input_ios.Read(buffer_8, 0, 8);                                           // because we read 8 bytes at once
+
+                    if (ByteArrayCompare(buffer_8, pattern_memprot))                          // see if it matches
+                    {
+                        Console.WriteLine("* Disabling MEMPROT...");
+                        input_ios.Seek(offset + 6, SeekOrigin.Begin);                         // seek to offset
+                        input_ios.Write(patch_memprot, 0, 2);                                 // and then patch
+
+                        patchCount++;
+                    }
+                }
+
+                // nintendont 1
+                byte[] pattern_nintendont_1 = { 0xB0, 0xBA, 0x1C, 0x0F };
+                byte[] patch_nintendont_1 = { 0xE5, 0x9F, 0x10, 0x04, 0xE5, 0x91, 0x00, 0x00, 0xE1, 0x2F, 0xFF, 0x10, 0x12, 0xFF, 0xFF, 0xE0 };
+                for (int offset = 0; offset < input_ios.Length - 4; offset++)
+                {
+                    input_ios.Position = offset;                                              // set position to advance byte by byte
+                    input_ios.Read(buffer_4, 0, 4);                                           // because we read 4 bytes at once
+
+                    if (ByteArrayCompare(buffer_4, pattern_nintendont_1))                     // if it matches
+                    {
+                        Console.WriteLine("* Nintendont patch 1...");
+                        input_ios.Seek(offset - 12, SeekOrigin.Begin);                        // seek to offset
+                        input_ios.Write(patch_nintendont_1, 0, 16);                           // and then patch
+
+                        patchCount++;
+                    }
+                }
+
+                //nintendont 2
+                byte[] pattern_nintendont_2 = { 0x68, 0x4B, 0x2B, 0x06 };
+                byte[] patch_nintendont_2 = { 0x49, 0x01, 0x47, 0x88, 0x46, 0xC0, 0xE0, 0x01, 0x12, 0xFF, 0xFE, 0x00, 0x22, 0x00, 0x23, 0x01, 0x46, 0xC0, 0x46, 0xC0 };
+                for (int offset = 0; offset < input_ios.Length - 4; offset++)
+                {
+                    input_ios.Position = offset;                                              // set position to advance byte by byte
+                    input_ios.Read(buffer_4, 0, 4);                                           // because we read 4 bytes at once
+
+                    if (ByteArrayCompare(buffer_4, pattern_nintendont_2))                     // if it matches
+                    {
+                        Console.WriteLine("* Nintendont patch 2...");
+                        input_ios.Seek(offset, SeekOrigin.Begin);                             // seek to offset
+                        input_ios.Write(patch_nintendont_2, 0, 20);                           // and then patch
+
+                        patchCount++;
+                    }
+                }
+
+                //nintendont 3
+                byte[] pattern1_nintendont_3 = { 0x0D, 0x80, 0x00, 0x00, 0x0D, 0x80, 0x00, 0x00 };
+                byte[] pattern2_nintendont_3 = { 0x00, 0x00, 0x00, 0x02 };
+                byte[] patch_nintendont_3 = { 0x00, 0x00, 0x00, 0x03 };
+                for (int offset = 0; offset < input_ios.Length - 8; offset++)
+                {
+                    input_ios.Position = offset;                                              // set position to advance byte by byte
+                    input_ios.Read(buffer_8, 0, 8);                                           // because we read 8 bytes at once
+
+                    if (ByteArrayCompare(buffer_8, pattern1_nintendont_3))                    // if it matches
+                    {
+                        input_ios.Seek(offset+0x10, SeekOrigin.Begin);
+                        input_ios.Read(buffer_4, 0, 4);
+                        if (ByteArrayCompare(buffer_4, pattern2_nintendont_3))                // if it matches
+                        {
+                            Console.WriteLine("* Nintendont patch 3...");
+                            input_ios.Seek(offset+0x10, SeekOrigin.Begin);                    // seek to offset
+                            input_ios.Write(patch_nintendont_3, 0, 4);                        // and then patch
+
+                            patchCount++;
+                        }
+                    }
+                }
+
+                if (patchCount == 0)
+                    Console.WriteLine("Homebrew patching: Nothing to patch.");
+                else
+                    Console.WriteLine("Homebrew patching finished... (Patches applied: {0})", patchCount);
+
+                Console.WriteLine();
+            }
+
+            // for homebrew: allow wiimote passthrough
+            if (passthrough)
+            {
+                Console.WriteLine("Wiimote Passthrough patching:");
+                Array.Clear(buffer_4, 0, 4);
+                Array.Clear(buffer_8, 0, 8);
+                int patchCount = 0;
+
                 //wiimote passthrough
                 byte[] pattern_passthrough = { 0x20, 0x4B, 0x01, 0x68, 0x18, 0x47, 0x70, 0x00 };
                 byte[] patch_passthrough = { 0x20, 0x00 };
@@ -1069,7 +1203,6 @@ namespace nfs2iso2nfs
 
                         patchCount++;
                     }
-
                 }
 
                 // the custom function
@@ -1089,7 +1222,6 @@ namespace nfs2iso2nfs
 
                         patchCount++;
                     }
-
                 }
 
                 // call custom function
@@ -1109,110 +1241,12 @@ namespace nfs2iso2nfs
 
                         patchCount++;
                     }
-
-                }
-
-                // disable AHBPROT
-                byte[] pattern_ahbprot = { 0x20, 0x00, 0xF0, 0x04, 0xFB, 0x2B, 0x48, 0x29 };
-                byte[] patch_ahbprot = { 0x20, 0x01 };
-
-                for (int offset = 0; offset < input_ios.Length - 8; offset++)
-                {
-                    input_ios.Position = offset;                                              // set position to advance byte by byte
-                    input_ios.Read(buffer_8, 0, 8);                                           // because we read 8 bytes at once
-
-                    if (ByteArrayCompare(buffer_8, pattern_ahbprot))                          // see if it matches
-                    {
-                        Console.WriteLine("* Disabling AHBPROT...");
-                        input_ios.Seek(offset, SeekOrigin.Begin);                             // seek to offset
-                        input_ios.Write(patch_ahbprot, 0, 2);                                 // and then patch
-
-                        patchCount++;
-                    }
-
-                }
-
-                //disable MEMPROT
-                byte[] pattern_memprot = { 0x0D, 0x80, 0x01, 0x94, 0xB5, 0x00, 0x4B, 0x08 };
-                byte[] patch_memprot = { 0x22, 0x00 };
-
-                for (int offset = 0; offset < input_ios.Length - 8; offset++)
-                {
-                    input_ios.Position = offset;                                              // set position to advance byte by byte
-                    input_ios.Read(buffer_8, 0, 8);                                           // because we read 8 bytes at once
-
-                    if (ByteArrayCompare(buffer_8, pattern_memprot))                          // see if it matches
-                    {
-                        Console.WriteLine("* Disabling MEMPROT...");
-                        input_ios.Seek(offset + 8, SeekOrigin.Begin);                         // seek to offset
-                        input_ios.Write(patch_memprot, 0, 2);                                 // and then patch
-
-                        patchCount++;
-                    }
-
-                }
-
-                // nintendont 1
-                byte[] pattern_nintendont_1 = { 0xB0, 0xBA, 0x1C, 0x0F };
-                byte[] patch_nintendont_1 = { 0xE5, 0x9F, 0x10, 0x04, 0xE5, 0x91, 0x00, 0x00, 0xE1, 0x2F, 0xFF, 0x10, 0x12, 0xFF, 0xFF, 0xE0 };
-                for (int offset = 0; offset < input_ios.Length - 4; offset++)
-                {
-                    input_ios.Position = offset;                                              // set position to advance byte by byte
-                    input_ios.Read(buffer_4, 0, 4);                                           // because we read 4 bytes at once
-
-                    if (ByteArrayCompare(buffer_4, pattern_nintendont_1))                     // if it matches
-                    {
-                        Console.WriteLine("* Nintendont patch 1...");
-                        input_ios.Seek(offset - 12, SeekOrigin.Begin);                        // seek to offset
-                        input_ios.Write(patch_nintendont_1, 0, 16);                           // and then patch
-
-                        patchCount++;
-                    }
-
-                }
-
-                //nintendont 2
-                byte[] pattern_nintendont_2 = { 0x68, 0x4B, 0x2B, 0x06 };
-                byte[] patch_nintendont_2 = { 0x49, 0x01, 0x47, 0x88, 0x46, 0xC0, 0xE0, 0x01, 0x12, 0xFF, 0xFE, 0x00, 0x22, 0x00, 0x23, 0x01, 0x46, 0xC0, 0x46, 0xC0 };
-                for (int offset = 0; offset < input_ios.Length - 4; offset++)
-                {
-                    input_ios.Position = offset;                                              // set position to advance byte by byte
-                    input_ios.Read(buffer_4, 0, 4);                                           // because we read 4 bytes at once
-
-                    if (ByteArrayCompare(buffer_4, pattern_nintendont_2))                     // if it matches
-                    {
-                        Console.WriteLine("* Nintendont patch 2...");
-                        input_ios.Seek(offset, SeekOrigin.Begin);                             // seek to offset
-                        input_ios.Write(patch_nintendont_2, 0, 20);                           // and then patch
-
-                        patchCount++;
-                    }
-
-                }
-
-                //nintendont 3
-                byte[] pattern_nintendont_3 = { 0x0D, 0x80, 0x00, 0x00, 0x0D, 0x80, 0x00, 0x00 };
-                byte[] patch_nintendont_3 = { 0x0D, 0x80, 0x00, 0x00, 0x0D, 0x80, 0x00, 0x00, 0x00, 0x1C, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0F, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00 };
-                for (int offset = 0; offset < input_ios.Length - 8; offset++)
-                {
-                    input_ios.Position = offset;                                              // set position to advance byte by byte
-                    input_ios.Read(buffer_8, 0, 8);                                           // because we read 8 bytes at once
-
-                    if (ByteArrayCompare(buffer_8, pattern_nintendont_3))                     // if it matches
-                    {
-                        Console.WriteLine("* Nintendont patch 3...");
-                        input_ios.Seek(offset, SeekOrigin.Begin);                             // seek to offset
-                        input_ios.Write(patch_nintendont_3, 0, 24);                           // and then patch
-
-                        patchCount++;
-                    }
-
                 }
 
                 if (patchCount == 0)
-                    Console.WriteLine("Homebrew patching: Nothing to patch.");
+                    Console.WriteLine("Wiimote Passthrough patching: Nothing to patch.");
                 else
-                    Console.WriteLine("Homebrew patching finished... (Patches applied: {0})", patchCount);
+                    Console.WriteLine("Wiimote Passthrough patching finished... (Patches applied: {0})", patchCount);
 
                 Console.WriteLine();
             }
