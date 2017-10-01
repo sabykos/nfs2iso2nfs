@@ -18,11 +18,17 @@ namespace nfs2iso2nfs
         public static bool enc = false;
         public static bool keepFiles = false;
         public static bool keepLegit = false;
+        public static bool horiz_wiimote = false;
+        public static bool vert_wiimote = false;
+        public static bool map_shoulder_to_trigger = false;
+        public static bool homebrew = false;
+        public static bool passthrough = false;
         public static string keyFile = "..\\code\\htk.bin";
         public static string isoFile = "game.iso";
         public static string wiiKeyFile = "wii_common_key.bin";
         public static string nfsDir = "";
-        public static string fwFile = "..\\code\\fw.img";
+        public static string fw_file = "..\\code\\fw.img";
+
 
         static void Main(string[] args)
         {
@@ -39,7 +45,7 @@ namespace nfs2iso2nfs
                 EnDecryptNFS("hif.nfs", "hif_dec.nfs", key, buildZero(key.Length), false, header);
                 if (!keepFiles)
                     File.Delete("hif.nfs");
-                unpackNFS("hif_dec.nfs","hif_unpack.nfs", header);
+                unpackNFS("hif_dec.nfs", "hif_unpack.nfs", header);
                 if (!keepFiles)
                     File.Delete("hif_dec.nfs");
                 manipulateISO("hif_unpack.nfs", "game.iso", true);
@@ -48,8 +54,8 @@ namespace nfs2iso2nfs
             }
             else if (enc)
             {
-                if (!keepLegit)
-                    patchFakeSigning(fwFile);
+                if (!keepLegit || horiz_wiimote || vert_wiimote || map_shoulder_to_trigger)
+                    DoThePatching(fw_file);
                 long[] size = manipulateISO(isoFile, "hif_unpack.nfs", false);
                 byte[] header = packNFS("hif_unpack.nfs", "hif_dec.nfs", size);
                 if (!keepFiles)
@@ -69,8 +75,8 @@ namespace nfs2iso2nfs
             for (int i = 0; i < args.Length; i++)
                 switch (args[i])
                 {
-                    case "-dec": 
-                        dec=true;
+                    case "-dec":
+                        dec = true;
                         break;
                     case "-enc":
                         enc = true;
@@ -84,13 +90,13 @@ namespace nfs2iso2nfs
                     case "-key":
                         if (i == args.Length)
                             return -1;
-                        keyFile = args[i+1];
+                        keyFile = args[i + 1];
                         i++;
                         break;
                     case "-wiikey":
                         if (i == args.Length)
                             return -1;
-                        wiiKeyFile = args[i+1];
+                        wiiKeyFile = args[i + 1];
                         i++;
                         break;
                     case "-iso":
@@ -108,14 +114,30 @@ namespace nfs2iso2nfs
                     case "-fwimg":
                         if (i == args.Length)
                             return -1;
-                        fwFile = args[i + 1];
+                        fw_file = args[i + 1];
                         i++;
                         break;
+                    case "-lrpatch":
+                        map_shoulder_to_trigger = true;
+                        break;
+                    case "-wiimote":
+                        horiz_wiimote = true;
+                        break;
+                    case "-vertical":
+                        vert_wiimote = true;
+                        break;
+                    case "-homebrew":
+                        homebrew = true;
+                        break;
+                    case "-passthrough":
+                        passthrough = true;
+                        break;
+
                     case "-help":
-                        Console.WriteLine("+++++ NFS2ISO2NFS v0.4+++++");
+                        Console.WriteLine("+++++ NFS2ISO2NFS v0.5.4 +++++");
                         Console.WriteLine();
                         Console.WriteLine("-dec            Decrypt .nfs files to an .iso file.");
-                        Console.WriteLine("-enc            Encrypt an .iso file to -nfs file(s)");
+                        Console.WriteLine("-enc            Encrypt an .iso file to .nfs file(s)");
                         Console.WriteLine("-key <file>     Location of AES key file. DEFAULT: code\\htk.bin.");
                         Console.WriteLine("-wiikey <file>  Location of Wii Common key file. DEFAULT: wii_common_key.bin.");
                         Console.WriteLine("-iso <file>     Location of .iso file. DEFAULT: game.iso.");
@@ -123,6 +145,11 @@ namespace nfs2iso2nfs
                         Console.WriteLine("-fwimg <file>   Location of fw.img. DEFAULT: code\\fw.img.");
                         Console.WriteLine("-keep           Don't delete the files produced in intermediate steps.");
                         Console.WriteLine("-legit          Don't patch fw.img to allow fakesigned content");
+                        Console.WriteLine("-lrpatch        Map emulated Classic Controller's L & R to Gamepad's ZL & ZR");
+                        Console.WriteLine("-wiimote        Emulate a Wii Remote instead of the Classic Controller");
+                        Console.WriteLine("-vertical       Remap Wii Remote d-pad for vertical usage (implies -wiimote)");
+                        Console.WriteLine("-homebrew       Various patches to enable proper homebrew functionality");
+                        Console.WriteLine("-passthrough    Allow homebrew to keep using normal wiimotes with gamepad enabled");
                         Console.WriteLine("-help           Print this text.");
                         return -1;
                     default:
@@ -138,8 +165,16 @@ namespace nfs2iso2nfs
                 wiiKeyFile = dir + "\\" + wiiKeyFile;
             if (!Path.IsPathRooted(nfsDir))
                 nfsDir = dir + "\\" + nfsDir;
-            if (!Path.IsPathRooted(fwFile))
-                fwFile = dir + "\\" + fwFile;
+            if (!Path.IsPathRooted(fw_file))
+                fw_file = dir + "\\" + fw_file;
+
+
+            if (map_shoulder_to_trigger && horiz_wiimote || map_shoulder_to_trigger && vert_wiimote)
+            {
+                Console.WriteLine("ERROR: Please don't mix patches for Classic Controller and  Wii Remote.");
+                return -1;
+            }
+
 
             if (dec || ((!dec && !enc) && File.Exists(nfsDir + "\\hif_000000.nfs")))
             {
@@ -147,29 +182,30 @@ namespace nfs2iso2nfs
                 Console.WriteLine();
                 if (dec && !enc && !File.Exists(nfsDir + "\\hif_000000.nfs"))
                 {
-                    Console.WriteLine(".nfs files not found! Exiting...");
+                    Console.WriteLine("ERROR: .nfs files not found! Exiting...");
                     return -1;
                 }
                 else if ((!dec && !enc) && File.Exists(nfsDir + "\\hif_000000.nfs"))
-                {  
+                {
                     Console.WriteLine("You haven't specified if you want to use nfs2iso or iso2nfs");
                     Console.WriteLine("Found .nfs files! Assuming you want to use nfs2iso...");
                     dec = true;
                     enc = false;
                 }
             }
+
             else if (enc || (((!dec && !enc) || (!dec && !enc)) && File.Exists(isoFile)))
             {
                 Console.WriteLine("+++++ ISO2NFS +++++");
                 Console.WriteLine();
                 if (!dec && enc && !File.Exists(isoFile))
                 {
-                    Console.WriteLine(".iso file not found! Exiting...");
+                    Console.WriteLine("ERROR: .iso file not found! Exiting...");
                     return -1;
                 }
-                if (!dec && enc && !File.Exists(fwFile))
+                if (!dec && enc && !File.Exists(fw_file))
                 {
-                    Console.WriteLine("fw.img not found! Exiting...");
+                    Console.WriteLine("ERROR: fw.img not found! Exiting...");
                     return -1;
                 }
                 else if (((dec && enc) || (!dec && !enc)) && File.Exists(isoFile))
@@ -180,6 +216,7 @@ namespace nfs2iso2nfs
                     enc = true;
                 }
             }
+
             else
             {
                 Console.WriteLine("You haven't specified if you want to use nfs2iso or iso2nfs");
@@ -195,13 +232,13 @@ namespace nfs2iso2nfs
             Console.WriteLine("Searching for AES key file...");
             if (!File.Exists(keyFile))
             {
-                Console.WriteLine("Could not find AES key file! Exiting...");
+                Console.WriteLine("ERROR: Could not find AES key file! Exiting...");
                 return null;
             }
             byte[] key = getKey(keyFile);
             if (key == null)
             {
-                Console.WriteLine("AES key file has wrong file size! Exiting...");
+                Console.WriteLine("ERROR: AES key file has wrong file size! Exiting...");
                 return null;
             }
             Console.WriteLine("AES key file found!");
@@ -211,18 +248,20 @@ namespace nfs2iso2nfs
                 Console.WriteLine("Wii common key not found in source code. Looking for file...");
                 if (!File.Exists(wiiKeyFile))
                 {
-                    Console.WriteLine("Could not find Wii common key file! Exiting...");
+                    Console.WriteLine("ERROR: Could not find Wii common key file! Exiting...");
                     return null;
                 }
                 WII_COMMON_KEY = getKey(wiiKeyFile);
                 if (key == null)
                 {
-                    Console.WriteLine("Wii common key file has wrong file size! Exiting...");
+                    Console.WriteLine("ERROR: Wii common key file has wrong file size! Exiting...");
                     return null;
                 }
                 Console.WriteLine("Wii Common Key file found!");
             }
             else Console.WriteLine("Wii common key found in source code!");
+
+            Console.WriteLine();
             return key;
         }
 
@@ -280,7 +319,7 @@ namespace nfs2iso2nfs
             {
                 Console.WriteLine();
                 long size = nfs.BaseStream.Length;
-                int i=0;
+                int i = 0;
                 do
                 {
                     Console.WriteLine("Building hif_" + String.Format("{0:D6}", i) + ".nfs...");
@@ -316,15 +355,15 @@ namespace nfs2iso2nfs
 
                 byte[] partitionTable = er.ReadBytes(0x20);
                 ew.Write(partitionTable);
-                int[,] partitionInfo = new int[2,4];            //first coorfinate number of partitions, second offset of partition table
+                int[,] partitionInfo = new int[2, 4];            //first coorfinate number of partitions, second offset of partition table
                 for (byte i = 0; i < 4; i++)
                 {
-                    partitionInfo[0,i] = partitionTable[0x0 + 0x8*i] * 0x1000000 + partitionTable[0x1 + 0x8*i] * 0x10000 + partitionTable[0x2 + 0x8*i] * 0x100 + partitionTable[0x3 + 0x8*i];
-                    Console.WriteLine("Number of " + (i+1) + ". partitions: " + partitionInfo[0,i]);
+                    partitionInfo[0, i] = partitionTable[0x0 + 0x8 * i] * 0x1000000 + partitionTable[0x1 + 0x8 * i] * 0x10000 + partitionTable[0x2 + 0x8 * i] * 0x100 + partitionTable[0x3 + 0x8 * i];
+                    Console.WriteLine("Number of " + (i + 1) + ". partitions: " + partitionInfo[0, i]);
                     if (partitionInfo[0, i] == 0)
                         partitionInfo[1, i] = 0;
-                    else partitionInfo[1,i] = (partitionTable[0x4 + 0x8*i] * 0x1000000 + partitionTable[0x5 + 0x8*i] * 0x10000 + partitionTable[0x6 + 0x8*i] * 0x100 + partitionTable[0x7 + 0x8*i]) * 0x4;
-                    Console.WriteLine("Partition info table offset: 0x" + Convert.ToString(partitionInfo[1,i], 16));
+                    else partitionInfo[1, i] = (partitionTable[0x4 + 0x8 * i] * 0x1000000 + partitionTable[0x5 + 0x8 * i] * 0x10000 + partitionTable[0x6 + 0x8 * i] * 0x100 + partitionTable[0x7 + 0x8 * i]) * 0x4;
+                    Console.WriteLine("Partition info table offset: 0x" + Convert.ToString(partitionInfo[1, i], 16));
                 }
                 Console.WriteLine();
                 partitionInfo = sort(partitionInfo, 4);
@@ -516,45 +555,45 @@ namespace nfs2iso2nfs
                 for (int i = 0; i < 0x200; i++)
                     header[i] = 0xff;
 
-                header[0x0]=0x45;
-                header[0x1]=0x47;
-                header[0x2]=0x47;
-                header[0x3]=0x53;
+                header[0x0] = 0x45;
+                header[0x1] = 0x47;
+                header[0x2] = 0x47;
+                header[0x3] = 0x53;
 
-                header[0x4]=0x00;
-                header[0x5]=0x01;
-                header[0x6]=0x10;
-                header[0x7]=0x11;
+                header[0x4] = 0x00;
+                header[0x5] = 0x01;
+                header[0x6] = 0x10;
+                header[0x7] = 0x11;
 
-                header[0x8]=0x00;
-                header[0x9]=0x00;
-                header[0xA]=0x00;
-                header[0xB]=0x00;
+                header[0x8] = 0x00;
+                header[0x9] = 0x00;
+                header[0xA] = 0x00;
+                header[0xB] = 0x00;
 
-                header[0xC]=0x00;
-                header[0xD]=0x00;
-                header[0xE]=0x00;
-                header[0xF]=0x00;
+                header[0xC] = 0x00;
+                header[0xD] = 0x00;
+                header[0xE] = 0x00;
+                header[0xF] = 0x00;
 
-                header[0x10]=0x00;
-                header[0x11]=0x00;
-                header[0x12]=0x00;
-                header[0x13]=0x03;
+                header[0x10] = 0x00;
+                header[0x11] = 0x00;
+                header[0x12] = 0x00;
+                header[0x13] = 0x03;
 
-                header[0x14]=0x00;
-                header[0x15]=0x00;
-                header[0x16]=0x00;
-                header[0x17]=0x00;
+                header[0x14] = 0x00;
+                header[0x15] = 0x00;
+                header[0x16] = 0x00;
+                header[0x17] = 0x00;
 
-                header[0x18]=0x00;
-                header[0x19]=0x00;
-                header[0x1A]=0x00;
-                header[0x1B]=0x01;
+                header[0x18] = 0x00;
+                header[0x19] = 0x00;
+                header[0x1A] = 0x00;
+                header[0x1B] = 0x01;
 
-                header[0x1C]=0x00;
-                header[0x1D]=0x00;
-                header[0x1E]=0x00;
-                header[0x1F]=0x08;
+                header[0x1C] = 0x00;
+                header[0x1D] = 0x00;
+                header[0x1E] = 0x00;
+                header[0x1F] = 0x08;
 
                 header[0x20] = 0x00;
                 header[0x21] = 0x00;
@@ -640,8 +679,8 @@ namespace nfs2iso2nfs
                     timer++;
                     Sector = er.ReadBytes(leftSize > SECTOR_SIZE ? SECTOR_SIZE : (int)leftSize);
 
-                    
-                    if(ew.BaseStream.Position >= 0x18000)                               //use the different IVs if writing game partition data
+
+                    if (ew.BaseStream.Position >= 0x18000)                               //use the different IVs if writing game partition data
                     {
                         iv = block_iv;
                     }
@@ -651,12 +690,12 @@ namespace nfs2iso2nfs
                     {
                         Sector = aes_128_cbc(key, iv, Sector, true);                    // use zero IV
                     }
-                    
+
                     if (enc && ew.BaseStream.Position >= 0x18000)                       // if encrypting game partition
                     {
                         Sector = aes_128_cbc(key, block_iv, Sector, true);              // use different IV for each block
                         block_iv[15]++;                                                 // increment the value after writing
-                        if (block_iv[15] == 0)                                          // and go further if necessary 
+                        if (block_iv[15] == 0)                                          // and go further if necessary
                         {
                             block_iv[14]++;
                             if (block_iv[14] == 0)
@@ -675,12 +714,12 @@ namespace nfs2iso2nfs
                     {
                         Sector = aes_128_cbc(key, iv, Sector, false);
                     }
-                    
+
                     if (!enc && ew.BaseStream.Position >= 0x18000)                      // if decrypting game partition
                     {
                         Sector = aes_128_cbc(key, iv, Sector, false);                   // use different IV for each block
                         block_iv[15]++;                                                 // increment the value after writing
-                        if (block_iv[15] == 0)                                          // and go further if necessary 
+                        if (block_iv[15] == 0)                                          // and go further if necessary
                         {
                             block_iv[14]++;
                             if (block_iv[14] == 0)
@@ -752,10 +791,10 @@ namespace nfs2iso2nfs
             int temp;
             for (int j = 0; j < size; j++)
             {
-                for (int i = 0; i < size-j; i++)
-                    if (list[1,i] > max) 
+                for (int i = 0; i < size - j; i++)
+                    if (list[1, i] > max)
                     {
-                        max = list[1,i];
+                        max = list[1, i];
                         maxIndex = i;
                     }
                 temp = list[0, size - j - 1];
@@ -796,52 +835,429 @@ namespace nfs2iso2nfs
         static bool ByteArrayCompare(byte[] b1, byte[] b2)
         {
             // Validate buffers are the same length.
-            // This also ensures that the count does not exceed the length of either buffer.  
+            // This also ensures that the count does not exceed the length of either buffer.
             return b1.Length == b2.Length && memcmp(b1, b2, b1.Length) == 0;
         }
 
 
-        public static void patchFakeSigning(string fwFile)
+        public static void DoThePatching(string fw_file)
         {
-            if (File.Exists("fw.img.tmp"))                                                             // delete any existent temp file
+            var input_ios = new MemoryStream(File.ReadAllBytes(fw_file));                     //copy fw.img into a memory stream
+
+            Console.WriteLine("Checking fw.img's revision number...");
+
+            byte[] buffer_rev = new byte[4];
+            byte[] rev_pattern = { 0x73, 0x76, 0x6E, 0x2D };                                  // search for "svn-"
+            string revision = "";
+
+            for (int offset = 0; offset < input_ios.Length - 4; offset++)
             {
-                File.Delete("fw.img.tmp");
+                input_ios.Position = offset;                                                  // set position to advance byte by byte
+                input_ios.Read(buffer_rev, 0, 4);                                             // because we read 4 bytes at once
+
+                if (ByteArrayCompare(buffer_rev, rev_pattern))                                // see if it matches
+                {
+                    input_ios.Read(buffer_rev, 0, 4);
+                    revision = System.Text.Encoding.UTF8.GetString(buffer_rev, 0, buffer_rev.Length);
+                    break;
+                }
             }
-            File.Copy(fwFile, "fw.img.tmp");                                                        // create new temp file
 
-            using (var in_ios = new BinaryReader(File.OpenRead(fwFile)))
-            using (var out_ios = new BinaryWriter(File.OpenWrite(Directory.GetCurrentDirectory() + "\\fw.img.tmp")))
+            if (revision == "r590")
             {
-                Console.WriteLine();
-                Console.WriteLine("Patching fw.img to enable fakesigning...");
-                int patchCount = 0;
+                Console.WriteLine("OK, revision 590 detected.");
+            }
+            else
+            {
+                Console.WriteLine("Warning: {0} detected. These patches are designed for revision 590 only.", revision);
+            }
+            Console.WriteLine();
 
-                byte[] buff = new byte[4];
+
+            byte[] buffer_4 = new byte[4];                                                    // buffer for 4-byte arrays
+            byte[] buffer_8 = new byte[8];                                                    // buffer for 8-byte arrays
+
+            Console.WriteLine("Patching fw.img.");
+            if (!keepLegit)
+            {
+                Array.Clear(buffer_4, 0, 4);
+                int patchCount = 0;
                 byte[] oldHashCheck = { 0x20, 0x07, 0x23, 0xA2 };
                 byte[] newHashCheck = { 0x20, 0x07, 0x4B, 0x0B };
 
-                for (int offset = 0; offset < in_ios.BaseStream.Length - 4; offset++)
+                for (int offset = 0; offset < input_ios.Length - 4; offset++)
                 {
-                    in_ios.BaseStream.Position = offset;                                                // set position to advance byte by byte
-                    buff = in_ios.ReadBytes(4);                                                         // because we read 4 bytes at once
-                    if (ByteArrayCompare(buff, oldHashCheck) || ByteArrayCompare(buff, newHashCheck))   // see if it matches one of the patterns
+                    input_ios.Position = offset;                                                               // set position to advance byte by byte
+                    input_ios.Read(buffer_4, 0, 4);                                                            // because we read 4 bytes at once
+
+                    if (ByteArrayCompare(buffer_4, oldHashCheck) || ByteArrayCompare(buffer_4, newHashCheck))  // see if it matches one of the patterns
                     {
-                        out_ios.Seek(offset + 1, SeekOrigin.Begin);                                     // if it does, advance on byte further in
-                        out_ios.Write((byte)0x00);                                                      // the output and write a zero
+                        input_ios.Seek(offset + 1, SeekOrigin.Begin);                                          // if it does, advance on byte further in
+                        input_ios.WriteByte(0x00);                                                             // the output and write a zero
+
                         patchCount++;
                     }
-                    
                 }
+
                 if (patchCount == 0)
-                    Console.WriteLine("Nothing to patch");
+                    Console.WriteLine("Fakesign patching: Nothing to patch.");
                 else
-                    Console.WriteLine("Patching fakesigning finished... (Patches applied: {0})", patchCount);
+                    Console.WriteLine("Fakesigning patching finished... (Patches applied: {0})", patchCount);
+
+                Console.WriteLine();
             }
-            File.Delete(fwFile);                                                                 // delete original fw.img
-            File.Copy("fw.img.tmp", fwFile);                                                     // replace with patched temp file
-            File.Delete("fw.img.tmp");                                                           // delete temp file
+
+            //map classic controller's L & R to the gamepad's ZL & ZR
+            if (map_shoulder_to_trigger)
+            {
+                Array.Clear(buffer_4, 0, 4);
+                int patchCount = 0;
+
+                byte[] pattern1 = { 0x40, 0x05, 0x46, 0xA9 };
+                byte[] patch1 = { 0x26, 0x80, 0x40, 0x06 };
+
+                byte[] pattern2 = { 0x1C, 0x05, 0x40, 0x35 };
+                byte[] patch2 = { 0x25, 0x40, 0x40, 0x05 };
+
+                byte[] pattern3 = { 0x46, 0x53, 0x42, 0x18 };
+                byte[] patch3 = { 0x23, 0x10, 0x40, 0x03 };
+
+                byte[] pattern4 = { 0x1C, 0x05, 0x80, 0x22 };
+                byte[] patch4 = { 0x25, 0x40, 0x80, 0x22, 0x40, 0x05 };
+
+                for (int offset = 0; offset < input_ios.Length - 4; offset++)
+                {
+                    input_ios.Position = offset;                                             // set position to advance byte by byte
+                    input_ios.Read(buffer_4, 0, 4);                                          // because we read 4 bytes at once
+
+                    if (ByteArrayCompare(buffer_4, pattern1))                                // see if it matches
+                    {
+                        input_ios.Seek(offset, SeekOrigin.Begin);                            // seek
+                        input_ios.Write(patch1, 0, 4);                                       // and then patch
+
+                        patchCount++;
+                    }
+
+                    if (ByteArrayCompare(buffer_4, pattern2))                                // see if it matches
+                    {
+                        input_ios.Seek(offset, SeekOrigin.Begin);                            // seek
+                        input_ios.Write(patch2, 0, 4);                                       // and then patch
+
+                        patchCount++;
+                    }
+
+                    if (ByteArrayCompare(buffer_4, pattern3))                                // see if it matches
+                    {
+                        input_ios.Seek(offset, SeekOrigin.Begin);                            // seek
+                        input_ios.Write(patch3, 0, 4);                                       // and then patch
+
+                        patchCount++;
+                    }
+
+                    if (ByteArrayCompare(buffer_4, pattern4))                                // see if it matches
+                    {
+                        input_ios.Seek(offset, SeekOrigin.Begin);                            // seek
+                        input_ios.Write(patch4, 0, 6);                                       // and then patch
+
+                        patchCount++;
+                    }
+                }
+
+                if (patchCount == 0)
+                    Console.WriteLine("LR to ZLZR patching: Nothing to patch.");
+                else
+                    Console.WriteLine("LR to ZLZR patching finished. (Patches applied: {0})", patchCount);
+
+                Console.WriteLine();
+            }
+
+
+            //enable wii remote emulation
+            if (horiz_wiimote || vert_wiimote)
+            {
+                Array.Clear(buffer_8, 0, 8);
+                int patchCount = 0;
+                byte[] pattern = { 0x16, 0x13, 0x1C, 0x02, 0x40, 0x9A, 0x1C, 0x13 };
+                byte[] patch = { 0x23, 0x00 };
+
+                for (int offset = 0; offset < input_ios.Length - 6; offset++)
+                {
+                    input_ios.Position = offset;                                              // set position to advance byte by byte
+                    input_ios.Read(buffer_8, 0, 8);                                           // because we read 8 bytes at once
+
+                    if (ByteArrayCompare(buffer_8, pattern))                                  // see if it matches
+                    {
+                        input_ios.Seek(offset, SeekOrigin.Begin);                             // seek
+                        input_ios.Write(patch, 0, 2);                                         // and then patch
+
+                        patchCount++;
+                    }
+                }
+
+                if (patchCount == 0)
+                    Console.WriteLine("Wii Remote emulation patching: Nothing to patch.");
+                else
+                    Console.WriteLine("Wii Remote emulation enabled... (Patches applied: {0})", patchCount);
+
+                Console.WriteLine();
+
+            }
+
+
+            //enable horizontal wii remote emulation (remap dpad and ab12)
+            if (vert_wiimote)
+            {
+                Array.Clear(buffer_8, 0, 8);
+                int patchCount = 0;
+                byte[] pattern = { 0x4A, 0x71, 0x42, 0x13, 0xD0, 0xD2, 0x9B, 0x00 };
+
+                for (int offset = 0; offset < input_ios.Length - 8; offset++)
+                {
+                    input_ios.Position = offset;                                              // set position to advance byte by byte
+                    input_ios.Read(buffer_8, 0, 8);                                           // because we read 8 bytes at once
+
+                    if (ByteArrayCompare(buffer_8, pattern))                                  // see if it matches
+                    {
+                        input_ios.Seek(offset + 0x07, SeekOrigin.Begin);
+                        input_ios.WriteByte(0x02);                                            // dpad left -> down
+                        patchCount++;
+
+                        input_ios.Seek(offset + 0x0F, SeekOrigin.Begin);
+                        input_ios.WriteByte(0x03);                                            // dpad right -> up
+                        patchCount++;
+
+                        input_ios.Seek(offset + 0x1D, SeekOrigin.Begin);
+                        input_ios.WriteByte(0x01);                                            // dpad down -> right
+                        patchCount++;
+
+                        input_ios.Seek(offset + 0x2B, SeekOrigin.Begin);
+                        input_ios.WriteByte(0x00);                                            // dpad up -> left
+
+                        patchCount++;
+
+                        input_ios.Seek(offset + 0x65, SeekOrigin.Begin);
+                        input_ios.WriteByte(0x07);                                            // B -> 2
+                        patchCount++;
+
+                        input_ios.Seek(offset + 0x75, SeekOrigin.Begin);
+                        input_ios.WriteByte(0x06);                                            // A -> 1
+                        patchCount++;
+
+                        input_ios.Seek(offset + 0x85, SeekOrigin.Begin);
+                        input_ios.WriteByte(0x04);                                            // 1 -> B
+                        patchCount++;
+
+                        input_ios.Seek(offset + 0x95, SeekOrigin.Begin);
+                        input_ios.WriteByte(0x05);                                            // 2 -> A
+
+                        patchCount++;
+                    }
+                }
+
+                if (patchCount == 0)
+                    Console.WriteLine("Vertical Wii Remote patching: Nothing to patch.");
+                else
+                    Console.WriteLine("Vertical Wii Remote emulation enabled... (Patches applied: {0})", patchCount);
+
+                Console.WriteLine();
+            }
+
+
+            // enable proper input support in homebrew
+            if (homebrew)
+            {
+                Console.WriteLine("Homebrew-related patches:");
+                Array.Clear(buffer_4, 0, 4);
+                Array.Clear(buffer_8, 0, 8);
+                int patchCount = 0;
+
+
+                // disable AHBPROT
+                byte[] pattern_ahbprot = { 0xD0, 0x0B, 0x23, 0x08, 0x43, 0x13, 0x60, 0x0B };
+                byte[] patch_ahbprot = { 0x46, 0xC0 };
+
+                for (int offset = 0; offset < input_ios.Length - 8; offset++)
+                {
+                    input_ios.Position = offset;                                              // set position to advance byte by byte
+                    input_ios.Read(buffer_8, 0, 8);                                           // because we read 8 bytes at once
+
+                    if (ByteArrayCompare(buffer_8, pattern_ahbprot))                          // see if it matches
+                    {
+                        Console.WriteLine("* Disabling AHBPROT...");
+                        input_ios.Seek(offset, SeekOrigin.Begin);                             // seek to offset
+                        input_ios.Write(patch_ahbprot, 0, 2);                                 // and then patch
+
+                        patchCount++;
+                    }
+                }
+
+                //disable MEMPROT
+                byte[] pattern_memprot = { 0x01, 0x94, 0xB5, 0x00, 0x4B, 0x08, 0x22, 0x01 };
+                byte[] patch_memprot = { 0x22, 0x00 };
+
+                for (int offset = 0; offset < input_ios.Length - 8; offset++)
+                {
+                    input_ios.Position = offset;                                              // set position to advance byte by byte
+                    input_ios.Read(buffer_8, 0, 8);                                           // because we read 8 bytes at once
+
+                    if (ByteArrayCompare(buffer_8, pattern_memprot))                          // see if it matches
+                    {
+                        Console.WriteLine("* Disabling MEMPROT...");
+                        input_ios.Seek(offset + 6, SeekOrigin.Begin);                         // seek to offset
+                        input_ios.Write(patch_memprot, 0, 2);                                 // and then patch
+
+                        patchCount++;
+                    }
+                }
+
+                // nintendont 1
+                byte[] pattern_nintendont_1 = { 0xB0, 0xBA, 0x1C, 0x0F };
+                byte[] patch_nintendont_1 = { 0xE5, 0x9F, 0x10, 0x04, 0xE5, 0x91, 0x00, 0x00, 0xE1, 0x2F, 0xFF, 0x10, 0x12, 0xFF, 0xFF, 0xE0 };
+                for (int offset = 0; offset < input_ios.Length - 4; offset++)
+                {
+                    input_ios.Position = offset;                                              // set position to advance byte by byte
+                    input_ios.Read(buffer_4, 0, 4);                                           // because we read 4 bytes at once
+
+                    if (ByteArrayCompare(buffer_4, pattern_nintendont_1))                     // if it matches
+                    {
+                        Console.WriteLine("* Nintendont patch 1...");
+                        input_ios.Seek(offset - 12, SeekOrigin.Begin);                        // seek to offset
+                        input_ios.Write(patch_nintendont_1, 0, 16);                           // and then patch
+
+                        patchCount++;
+                    }
+                }
+
+                //nintendont 2
+                byte[] pattern_nintendont_2 = { 0x68, 0x4B, 0x2B, 0x06 };
+                byte[] patch_nintendont_2 = { 0x49, 0x01, 0x47, 0x88, 0x46, 0xC0, 0xE0, 0x01, 0x12, 0xFF, 0xFE, 0x00, 0x22, 0x00, 0x23, 0x01, 0x46, 0xC0, 0x46, 0xC0 };
+                for (int offset = 0; offset < input_ios.Length - 4; offset++)
+                {
+                    input_ios.Position = offset;                                              // set position to advance byte by byte
+                    input_ios.Read(buffer_4, 0, 4);                                           // because we read 4 bytes at once
+
+                    if (ByteArrayCompare(buffer_4, pattern_nintendont_2))                     // if it matches
+                    {
+                        Console.WriteLine("* Nintendont patch 2...");
+                        input_ios.Seek(offset, SeekOrigin.Begin);                             // seek to offset
+                        input_ios.Write(patch_nintendont_2, 0, 20);                           // and then patch
+
+                        patchCount++;
+                    }
+                }
+
+                //nintendont 3
+                byte[] pattern1_nintendont_3 = { 0x0D, 0x80, 0x00, 0x00, 0x0D, 0x80, 0x00, 0x00 };
+                byte[] pattern2_nintendont_3 = { 0x00, 0x00, 0x00, 0x02 };
+                byte[] patch_nintendont_3 = { 0x00, 0x00, 0x00, 0x03 };
+                for (int offset = 0; offset < input_ios.Length - 8; offset++)
+                {
+                    input_ios.Position = offset;                                              // set position to advance byte by byte
+                    input_ios.Read(buffer_8, 0, 8);                                           // because we read 8 bytes at once
+
+                    if (ByteArrayCompare(buffer_8, pattern1_nintendont_3))                    // if it matches
+                    {
+                        input_ios.Seek(offset+0x10, SeekOrigin.Begin);
+                        input_ios.Read(buffer_4, 0, 4);
+                        if (ByteArrayCompare(buffer_4, pattern2_nintendont_3))                // if it matches
+                        {
+                            Console.WriteLine("* Nintendont patch 3...");
+                            input_ios.Seek(offset+0x10, SeekOrigin.Begin);                    // seek to offset
+                            input_ios.Write(patch_nintendont_3, 0, 4);                        // and then patch
+
+                            patchCount++;
+                        }
+                    }
+                }
+
+                if (patchCount == 0)
+                    Console.WriteLine("Homebrew patching: Nothing to patch.");
+                else
+                    Console.WriteLine("Homebrew patching finished... (Patches applied: {0})", patchCount);
+
+                Console.WriteLine();
+            }
+
+            // for homebrew: allow wiimote passthrough
+            if (passthrough)
+            {
+                Console.WriteLine("Wiimote Passthrough patching:");
+                Array.Clear(buffer_4, 0, 4);
+                Array.Clear(buffer_8, 0, 8);
+                int patchCount = 0;
+
+                //wiimote passthrough
+                byte[] pattern_passthrough = { 0x20, 0x4B, 0x01, 0x68, 0x18, 0x47, 0x70, 0x00 };
+                byte[] patch_passthrough = { 0x20, 0x00 };
+
+                for (int offset = 0; offset < input_ios.Length - 8; offset++)
+                {
+                    input_ios.Position = offset;                                              // set position to advance byte by byte
+                    input_ios.Read(buffer_8, 0, 8);                                           // because we read 8 bytes at once
+
+                    if (ByteArrayCompare(buffer_8, pattern_passthrough))                      // if it matches
+                    {
+                        Console.WriteLine("* Enabling Wii Remote passthrough...");
+                        input_ios.Seek(offset + 3, SeekOrigin.Begin);                         // seek to offset
+                        input_ios.Write(patch_passthrough, 0, 2);                             // and then patch
+
+                        patchCount++;
+                    }
+                }
+
+                // the custom function
+                byte[] pattern_custom_func = { 0x28, 0x00, 0xD0, 0x03, 0x49, 0x02, 0x22, 0x09 };
+                byte[] patch_custom_func = { 0xF0, 0x04, 0xFF, 0x21, 0x48, 0x02, 0x21, 0x09, 0xF0, 0x04, 0xFE, 0xF9 };
+
+                for (int offset = 0; offset < input_ios.Length - 8; offset++)
+                {
+                    input_ios.Position = offset;                                              // set position to advance byte by byte
+                    input_ios.Read(buffer_8, 0, 8);                                           // because we read 8 bytes at once
+
+                    if (ByteArrayCompare(buffer_8, pattern_custom_func))                      // if it matches
+                    {
+                        Console.WriteLine("* Writing custom function...");
+                        input_ios.Seek(offset, SeekOrigin.Begin);                             // seek to offset
+                        input_ios.Write(patch_custom_func, 0, 12);                            // and then patch
+
+                        patchCount++;
+                    }
+                }
+
+                // call custom function
+                byte[] pattern_custom_call = { 0xF0, 0x01, 0xFA, 0xB9 };
+                byte[] patch_custom_call = { 0xF7, 0xFC, 0xFB, 0x95 };
+
+                for (int offset = 0; offset < input_ios.Length - 4; offset++)
+                {
+                    input_ios.Position = offset;                                              // set position to advance byte by byte
+                    input_ios.Read(buffer_4, 0, 4);                                           // because we read 4 bytes at once
+
+                    if (ByteArrayCompare(buffer_4, pattern_custom_call))                      // if it matches
+                    {
+                        Console.WriteLine("* Writing call to the custom function...");
+                        input_ios.Seek(offset, SeekOrigin.Begin);                             // seek to offset
+                        input_ios.Write(patch_custom_call, 0, 4);                             // and then patch
+
+                        patchCount++;
+                    }
+                }
+
+                if (patchCount == 0)
+                    Console.WriteLine("Wiimote Passthrough patching: Nothing to patch.");
+                else
+                    Console.WriteLine("Wiimote Passthrough patching finished... (Patches applied: {0})", patchCount);
+
+                Console.WriteLine();
+            }
+
+            // write to disk
+            //FileStream patched_file = File.OpenWrite("newfw.img");                     // for testing
+            FileStream patched_file = File.OpenWrite(fw_file);                           // open file
+            input_ios.WriteTo(patched_file);                                             // write
+            patched_file.Close();
+            input_ios.Close();
 
         }
-
     }
 }
